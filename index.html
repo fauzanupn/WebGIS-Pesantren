@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Peta Pesantren Al-Munawwir</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.css' rel='stylesheet' />
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; }
+        .page-header { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 200px; 
+            color: white; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.8); 
+        }
+        #map { height: 75vh; width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .sidebar-container { height: 75vh; overflow-y: auto; }
+        .legend-key { display: inline-block; border-radius: 50%; width: 10px; height: 10px; margin-right: 8px; box-shadow: 0 0 3px rgba(0,0,0,0.3); }
+        .map-controls { position: absolute; bottom: 20px; right: 20px; z-index: 2; }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .debug-info {
+            background: #f8f9fa;
+            border-left: 4px solid #dc3545;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 0.8rem;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .status-success { color: #28a745; }
+        .status-error { color: #dc3545; }
+        .status-warning { color: #ffc107; }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#"><i class="fas fa-mosque me-2"></i>Peta Pesantren Al-Munawwir</a>
+        </div>
+    </nav>
+    
+    <header class="page-header">
+        <h1 class="display-5 fw-bold text-white">Peta Lokasi Bangunan Pesantren</h1>
+    </header>
+    
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-lg-3 mb-4">
+                <div class="card shadow-sm sidebar-container">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary"><i class="fas fa-book-open me-2"></i>Petunjuk</h5>
+                        <p class="small mb-4">Arahkan kursor ke poligon pada peta untuk melihat detail bangunan.</p>
+                        
+                        <div class="card p-3 border-start border-primary border-4">
+                            <h6 class="text-dark fw-bold mb-2"><i class="fas fa-list me-1"></i> Legenda Bangunan:</h6>
+                            <ul class="list-unstyled small mb-0">
+                                <li class="mb-1"><span class="legend-key" style="background-color: #ff5733;"></span> Asrama Putra</li>
+                                <li class="mb-1"><span class="legend-key" style="background-color: #33aaff;"></span> Asrama Putri</li>
+                                <li class="mb-1"><span class="legend-key" style="background-color: #4CAF50;"></span> Bangunan Umum</li>
+                            </ul>
+                        </div>
+
+                        <div class="mt-3">
+                            <button id="upload-geojson" class="btn btn-primary btn-sm w-100 mb-2">
+                                <i class="fas fa-upload me-1"></i> Upload GeoJSON Manual
+                            </button>
+                            <button id="show-sample" class="btn btn-success btn-sm w-100">
+                                <i class="fas fa-code me-1"></i> Gunakan Data Sample
+                            </button>
+                        </div>
+
+                        <div class="debug-info mt-3">
+                            <strong>Debug Info:</strong>
+                            <div id="debug-output" class="small mt-1"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-9 position-relative">
+                <div id="loading" class="loading-overlay">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Memuat peta dan data...</p>
+                        <div id="loading-details" class="small text-muted mt-2"></div>
+                    </div>
+                </div>
+                <div id="map"></div>
+                <div class="map-controls">
+                    <button id="fly-to-pesantren" class="btn btn-warning shadow-sm fw-bold">
+                        <i class="fas fa-location-arrow me-1"></i> Reset Zoom
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal untuk upload GeoJSON -->
+    <div class="modal fade" id="uploadModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Upload File GeoJSON</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Pilih Tipe Bangunan:</label>
+                        <select class="form-select" id="layer-type">
+                            <option value="asrama-putra">Asrama Putra</option>
+                            <option value="asrama-putri">Asrama Putri</option>
+                            <option value="bangunan-umum">Bangunan Umum</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Pilih File GeoJSON:</label>
+                        <input type="file" class="form-control" id="geojson-file" accept=".geojson,.json">
+                    </div>
+                    <div class="alert alert-info small">
+                        <i class="fas fa-info-circle"></i> Pastikan file GeoJSON Anda valid dan berformat UTF-8.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="button" class="btn btn-primary" id="process-upload">Upload</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-dark text-white mt-5 py-4">
+        <div class="container">
+            <div class="text-center">
+                <p>&copy; Fauzan Zaidan (117230065). All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.js'></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src='https://unpkg.com/@turf/turf@6/turf.min.js'></script>
+    
+    <script>
+        // Debug function
+        function debugLog(message, type = 'info') {
+            console.log(`[${type.toUpperCase()}] ${message}`);
+            const debugOutput = document.getElementById('debug-output');
+            if (debugOutput) {
+                const timestamp = new Date().toLocaleTimeString();
+                const className = type === 'error' ? 'status-error' : 
+                                type === 'success' ? 'status-success' : 
+                                type === 'warning' ? 'status-warning' : '';
+                debugOutput.innerHTML += `<div class="${className}">${timestamp}: ${message}</div>`;
+                debugOutput.scrollTop = debugOutput.scrollHeight;
+            }
+        }
+
+        function updateLoadingDetails(message) {
+            const loadingDetails = document.getElementById('loading-details');
+            if (loadingDetails) {
+                loadingDetails.textContent = message;
+            }
+        }
+
+        mapboxgl.accessToken = 'pk.eyJ1IjoiZmF1emFuMTkiLCJhIjoiY21nZ3F2bHZkMGwxcTJrc2NvaWMxeXA5ZyJ9.R4y7TCtDbA2sHMFY3bVpUQ'; 
+
+        debugLog('Menginisialisasi peta Mapbox...', 'info');
+
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/streets-v12',
+            center: [110.361049, -7.82565],
+            zoom: 16
+        });
+
+        // Kontrol Map
+        map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+        
+        // Konfigurasi layer
+        const layerConfigs = {
+            'asrama-putra': { color: '#ff5733', name: 'Asrama Putra' },
+            'asrama-putri': { color: '#33aaff', name: 'Asrama Putri' },
+            'bangunan-umum': { color: '#4CAF50', name: 'Bangunan Umum' }
+        };
+
+        let loadedFeatures = [];
+        let hasError = false;
+
+        // Data sample sebagai fallback
+        const sampleData = {
+            'asrama-putra': {
+                type: "FeatureCollection",
+                features: [
+                    {
+                        type: "Feature",
+                        properties: { 
+                            nama: "Asrama Putra A", 
+                            deskripsi: "Asrama untuk santri putra - Gedung utama",
+                            luas: "500 m²",
+                            kapasitas: "50 santri"
+                        },
+                        geometry: {
+                            type: "Polygon",
+                            coordinates: [[
+                                [110.359, -7.824],
+                                [110.360, -7.824],
+                                [110.360, -7.825],
+                                [110.359, -7.825],
+                                [110.359, -7.824]
+                            ]]
+                        }
+                    },
+                    {
+                        type: "Feature",
+                        properties: { 
+                            nama: "Asrama Putra B", 
+                            deskripsi: "Asrama untuk santri putra - Gedung tambahan",
+                            luas: "300 m²",
+                            kapasitas: "30 santri"
+                        },
+                        geometry: {
+                            type: "Polygon",
+                            coordinates: [[
+                                [110.358, -7.823],
+                                [110.359, -7.823],
+                                [110.359, -7.824],
+                                [110.358, -7.824],
+                                [110.358, -7.823]
+                            ]]
+                        }
+                    }
+                ]
+            },
+            'asrama-putri': {
+                type: "FeatureCollection",
+                features: [
+                    {
+                        type: "Feature",
+                        properties: { 
+                            nama: "Asrama Putri A", 
+                            deskripsi: "Asrama untuk santri putri - Gedung utama",
+                            luas: "450 m²",
+                            kapasitas: "40 santri"
+                        },
+                        geometry: {
+                            type: "Polygon",
+                            coordinates: [[
+                                [110.361, -7.824],
+                                [110.362, -7.824],
+                                [110.362, -7.825],
+                                [110.361, -7.825],
+                                [110.361, -7.824]
+                            ]]
+                        }
+                    }
+                ]
+            },
+            'bangunan-umum': {
+                type: "FeatureCollection",
+                features: [
+                    {
+                        type: "Feature",
+                        properties: { 
+                            nama: "Masjid Al-Munawwir", 
+                            deskripsi: "Masjid utama pesantren",
+                            luas: "800 m²",
+                            kapasitas: "500 jamaah"
+                        },
+                        geometry: {
+                            type: "Polygon",
+                            coordinates: [[
+                                [110.360, -7.826],
+                                [110.361, -7.826],
+                                [110.361, -7.827],
+                                [110.360, -7.827],
+                                [110.360, -7.826]
+                            ]]
+                        }
+                    },
+                    {
+                        type: "Feature",
+                        properties: { 
+                            nama: "Aula Serbaguna", 
+                            deskripsi: "Gedung serbaguna untuk kegiatan",
+                            luas: "600 m²",
+                            kapasitas: "300 orang"
+                        },
+                        geometry: {
+                            type: "Polygon",
+                            coordinates: [[
+                                [110.362, -7.826],
+                                [110.363, -7.826],
+                                [110.363, -7.827],
+                                [110.362, -7.827],
+                                [110.362, -7.826]
+                            ]]
+                        }
+                    }
+                ]
+            }
+        };
+
+        // Fungsi untuk menambahkan layer ke peta
+        function addLayerToMap(geojson, layerId) {
+            const layerConfig = layerConfigs[layerId];
+            
+            // Kumpulkan fitur
+            if (geojson.features && Array.isArray(geojson.features)) {
+                loadedFeatures.push(...geojson.features);
+                debugLog(`Menambahkan ${geojson.features.length} fitur dari ${layerConfig.name}`, 'success');
+            }
+
+            // Hapus layer/source jika sudah ada
+            if (map.getSource(layerId)) {
+                if (map.getLayer(layerId + '-fill')) map.removeLayer(layerId + '-fill');
+                if (map.getLayer(layerId + '-outline')) map.removeLayer(layerId + '-outline');
+                map.removeSource(layerId);
+            }
+
+            // Tambahkan Source dan Layers ke Map
+            try {
+                map.addSource(layerId, { 
+                    type: 'geojson', 
+                    data: geojson 
+                });
+                
+                // Tambahkan layer fill
+                map.addLayer({ 
+                    id: layerId + '-fill', 
+                    type: 'fill', 
+                    source: layerId, 
+                    paint: { 
+                        'fill-color': layerConfig.color, 
+                        'fill-opacity': 0.7 
+                    } 
+                });
+                
+                // Tambahkan layer outline
+                map.addLayer({ 
+                    id: layerId + '-outline', 
+                    type: 'line', 
+                    source: layerId, 
+                    paint: { 
+                        'line-color': '#343a40', 
+                        'line-width': 1.5 
+                    } 
+                });
+                
+                addPopupInteractions(layerId);
+                debugLog(`✓ Layer ${layerConfig.name} berhasil ditambahkan ke peta`, 'success');
+                
+            } catch (error) {
+                debugLog(`✗ Error menambahkan layer ${layerConfig.name}: ${error.message}`, 'error');
+                hasError = true;
+            }
+        }
+
+        // Fungsi untuk menambahkan interaksi Popup
+        let popup;
+        function addPopupInteractions(layerId) {
+            const layerConfig = layerConfigs[layerId];
+            
+            map.on('mousemove', layerId + '-fill', (e) => {
+                if (e.features.length > 0) {
+                    map.getCanvas().style.cursor = 'pointer';
+                    const feature = e.features[0];
+                    
+                    if (popup) popup.remove(); 
+
+                    const properties = feature.properties || {};
+                    const nama = properties.nama || properties.name || properties.NAMA || layerConfig.name;
+                    const deskripsi = properties.deskripsi || properties.description || properties.DESKRIPSI || 'Detail bangunan tidak tersedia';
+                    const luas = properties.luas || '';
+                    const kapasitas = properties.kapasitas || '';
+
+                    let popupContent = `
+                        <h6 class="mb-1 text-primary">${nama}</h6>
+                        <p class="small mb-1">${deskripsi}</p>
+                    `;
+                    
+                    if (luas) popupContent += `<p class="small mb-0"><strong>Luas:</strong> ${luas}</p>`;
+                    if (kapasitas) popupContent += `<p class="small mb-0"><strong>Kapasitas:</strong> ${kapasitas}</p>`;
+                    
+                    popupContent += `<div class="small text-muted mt-1">${layerConfig.name}</div>`;
+
+                    popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false })
+                        .setLngLat(e.lngLat)
+                        .setHTML(popupContent)
+                        .addTo(map);
+                }
+            });
+
+            map.on('mouseleave', layerId + '-fill', () => {
+                map.getCanvas().style.cursor = '';
+                if (popup) popup.remove();
+            });
+        }
+
+        function finishLoading() {
+            // Mengatur Peta Agar Terpusat ke Area GeoJSON
+            setTimeout(() => {
+                if (loadedFeatures.length > 0 && !hasError) {
+                    try {
+                        const featureCollection = turf.featureCollection(loadedFeatures);
+                        const bbox = turf.bbox(featureCollection);
+                        map.fitBounds(bbox, { padding: 50, duration: 1500 });
+                        debugLog('Peta berhasil di-zoom ke area GeoJSON', 'success');
+                    } catch (error) {
+                        debugLog('Error saat fitBounds: ' + error.message, 'error');
+                    // Fallback ke lokasi default
+                        map.flyTo({
+                            center: [110.361049, -7.82565],
+                            zoom: 16,
+                            duration: 2000
+                        });
+                    }
+                } else {
+                    // Fallback ke lokasi default
+                    map.flyTo({
+                        center: [110.361049, -7.82565],
+                        zoom: 16,
+                        duration: 2000
+                    });
+                }
+                
+                document.getElementById('loading').style.display = 'none';
+                debugLog('Proses loading selesai', 'success');
+            }, 1000);
+        }
+
+        // Fungsi untuk menggunakan data sample
+        function useSampleData() {
+            debugLog('Menggunakan data sample...', 'info');
+            updateLoadingDetails('Menggunakan data sample');
+            
+            loadedFeatures = [];
+            hasError = false;
+
+            Object.keys(sampleData).forEach(layerId => {
+                addLayerToMap(sampleData[layerId], layerId);
+            });
+
+            finishLoading();
+        }
+
+        // Fungsi untuk memproses upload file
+        function handleFileUpload(file, layerId) {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const geojson = JSON.parse(e.target.result);
+                    
+                    // Validasi dasar GeoJSON
+                    if (!geojson.type || !geojson.features) {
+                        throw new Error('Format GeoJSON tidak valid');
+                    }
+                    
+                    debugLog(`Berhasil memparsing file GeoJSON untuk ${layerConfigs[layerId].name}`, 'success');
+                    addLayerToMap(geojson, layerId);
+                    finishLoading();
+                    
+                } catch (error) {
+                    debugLog(`Error parsing file GeoJSON: ${error.message}`, 'error');
+                    alert('Error: File GeoJSON tidak valid!');
+                }
+            };
+            
+            reader.onerror = function() {
+                debugLog('Error membaca file', 'error');
+                alert('Error membaca file!');
+            };
+            
+            reader.readAsText(file);
+        }
+
+        // FUNGSI UTAMA: Memuat data ketika peta siap
+        map.on('load', () => {
+            debugLog('Peta berhasil dimuat', 'success');
+            
+            // Langsung gunakan data sample karena file external bermasalah
+            setTimeout(() => {
+                useSampleData();
+            }, 1000);
+        });
+
+        // Event listeners untuk tombol
+        document.getElementById('show-sample').addEventListener('click', useSampleData);
+        
+        document.getElementById('upload-geojson').addEventListener('click', () => {
+            const modal = new bootstrap.Modal(document.getElementById('uploadModal'));
+            modal.show();
+        });
+
+        document.getElementById('process-upload').addEventListener('click', () => {
+            const fileInput = document.getElementById('geojson-file');
+            const layerType = document.getElementById('layer-type').value;
+            
+            if (fileInput.files.length === 0) {
+                alert('Pilih file GeoJSON terlebih dahulu!');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            handleFileUpload(file, layerType);
+            
+            const modal = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
+            modal.hide();
+        });
+
+        document.getElementById('fly-to-pesantren').addEventListener('click', () => {
+            if (loadedFeatures.length > 0) {
+                try {
+                    const featureCollection = turf.featureCollection(loadedFeatures);
+                    const bbox = turf.bbox(featureCollection);
+                    map.fitBounds(bbox, { padding: 50, duration: 1500 });
+                } catch (error) {
+                    map.flyTo({
+                        center: [110.361049, -7.82565],
+                        zoom: 16,
+                        duration: 2000
+                    });
+                }
+            } else {
+                map.flyTo({
+                    center: [110.361049, -7.82565],
+                    zoom: 16,
+                    duration: 2000
+                });
+            }
+        });
+
+        // Handle error peta
+        map.on('error', (e) => {
+            debugLog('Error peta: ' + e.error.message, 'error');
+        });
+
+        // Solusi untuk masalah CORS - coba berbagai path
+        debugLog('Mencoba memuat file local...', 'info');
+        
+        // Coba akses file dengan berbagai cara
+        const tryLocalFiles = async () => {
+            const paths = [
+                'assets/geojson/ASRAMA_PUTRA.geojson',
+                './assets/geojson/ASRAMA_PUTRA.geojson',
+                '/assets/geojson/ASRAMA_PUTRA.geojson',
+                'ASRAMA_PUTRA.geojson'
+            ];
+            
+            for (const path of paths) {
+                try {
+                    const response = await fetch(path);
+                    if (response.ok) {
+                        debugLog(`✓ File ditemukan di: ${path}`, 'success');
+                        return true;
+                    }
+                } catch (error) {
+                    debugLog(`✗ Tidak bisa akses: ${path}`, 'error');
+                continue;
+                }
+            }
+            return false;
+        };
+
+        // Jalankan test file local
+        tryLocalFiles().then(success => {
+            if (!success) {
+                debugLog('Semua path gagal. Kemungkinan masalah:', 'error');
+                debugLog('1. File tidak ada di lokasi yang ditentukan', 'error');
+                debugLog('2. Server local memblokir akses file static', 'error');
+                debugLog('3. Masalah CORS (Cross-Origin Resource Sharing)', 'error');
+                debugLog('4. Nama file tidak sesuai (case sensitivity)', 'error');
+                debugLog('SOLUSI: Gunakan data sample atau upload file manual', 'warning');
+            }
+        });
+
+    </script>
+</body>
+</html>
